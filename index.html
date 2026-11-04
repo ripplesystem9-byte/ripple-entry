@@ -40,6 +40,7 @@ h2{font-size:15px;margin:0 0 6px}
 .badge{display:inline-block;font-size:11px;padding:1px 6px;border-radius:8px;background:#e8eef7;color:var(--main);margin-left:4px;font-weight:400}
 .nowin{color:var(--in);font-weight:700}
 .empty{color:var(--sub);font-size:14px;padding:8px 0}
+.hint{background:#fff8e6;border:1px solid #f1d9a0;color:#6b4e00;border-radius:10px;padding:10px 12px;margin-top:12px;font-size:13px}
 .foot{color:var(--sub);font-size:12px;margin-top:16px}
 .toast{position:fixed;left:16px;right:16px;bottom:20px;background:#1d2433;color:#fff;padding:14px;border-radius:12px;text-align:center;display:none;font-size:16px}
 </style></head><body><div class="wrap">
@@ -53,6 +54,7 @@ h2{font-size:15px;margin:0 0 6px}
   <input type="text" id="q" autocomplete="off" placeholder="例: 山田">
   <div id="cands"></div>
   <div id="noCand" class="empty" style="display:none">見つかりません。下の「名簿にない場合」から入れてください。</div>
+  <div class="hint">次に読んだときも、名前を聞かれるときは、スマホの<b>標準の「カメラ」アプリ</b>で読み取ってください。LINEや、iPhoneの「コードスキャナ」の中では、お名前を覚えられません。</div>
   <button type="button" class="link" id="showManual">名簿にない場合はこちら</button>
   <div id="manual" style="display:none">
     <label for="mc">会社名（個人の方は、屋号かお名前）</label>
@@ -104,6 +106,11 @@ function api(payload, ok, ng){
     .then(function(r){ if(tm) clearTimeout(tm); ok(r); })
     .catch(function(){ if(tm) clearTimeout(tm); ng('通信できませんでした。電波のよいところで、もう一度お試しください。'); });
 }
+// 直前の画面を、スマホの中に覚えておき、開いた瞬間に出す(最新の状態は、あとから入れ替わる)
+var CKEY = 'ripple_entry_last_v1_' + CTX.s;
+function today(){ var d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); }
+function saveLast(r){ try{ localStorage.setItem(CKEY, JSON.stringify({ day: today(), siteName: r.siteName || '', list: r.list || [], me: r.me || null })); }catch(e){} }
+function loadLast(){ try{ var v = JSON.parse(localStorage.getItem(CKEY) || 'null'); return v && v.day === today() ? v : null; }catch(e){ return null; } }
 function el(tag, cls, text){ var e = document.createElement(tag); if(cls) e.className = cls; if(text !== undefined) e.textContent = text; return e; }
 
 function renderList(list){
@@ -138,6 +145,7 @@ function onData(r, recorded){
   showErr('');
   $('site').textContent = r.siteName || '入退室の記録';
   document.title = (r.siteName || '入退室') + ' の入退室';
+  saveLast(r);
   show('listCard', true); renderList(r.list || []); renderMe(r.me);
   if(recorded && r.me){ toast(r.duplicate ? 'すでに「' + (r.me.state === 'in' ? '入場' : '退場') + '」になっています' : (r.me.state === 'in' ? '入場を記録しました（' + r.now + '）' : '退場を記録しました（' + r.now + '）')); }
 }
@@ -146,8 +154,8 @@ function choose(who){ me = who; saveMe(); refresh(); }
 
 $('act').addEventListener('click', function(){
   if(busy) return; busy = true; this.disabled = true;
-  var act = this.dataset.act;
-  api({ a: 'record', act: act, who: me }, function(r){ onData(r, true); }, function(t){ busy = false; $('act').disabled = false; showErr(t); });
+  var act = this.dataset.act; this.textContent = '送っています…';
+  api({ a: 'record', act: act, who: me }, function(r){ onData(r, true); }, function(t){ busy = false; $('act').disabled = false; $('act').textContent = act; showErr(t); });
 });
 $('switch').addEventListener('click', function(){ me = null; saveMe(); $('q').value = ''; $('cands').textContent = ''; show('noCand', false); renderMe(null); });
 $('showManual').addEventListener('click', function(){ show('manual', true); this.style.display = 'none'; });
@@ -160,6 +168,7 @@ $('q').addEventListener('input', function(){
   clearTimeout(searchTimer);
   var q = this.value.trim(), box = $('cands');
   if(q.length < 1){ box.textContent = ''; show('noCand', false); return; }
+  box.textContent = ''; box.appendChild(el('div', 'empty', '探しています…'));
   searchTimer = setTimeout(function(){
     api({ a: 'search', q: q }, function(r){
       box.textContent = '';
@@ -177,6 +186,12 @@ $('q').addEventListener('input', function(){
 loadMe();
 if(!CTX.g || !CTX.s || !CTX.k){ showErr('このQRコードは、いま使えません。現場の方に、新しいQRコードを確認してください。'); }
 else {
+  var last = loadLast();
+  if(last && me && last.me && last.me.name === me.name){
+    $('site').textContent = last.siteName || '入退室の記録';
+    show('listCard', true); renderList(last.list || []); renderMe(last.me);
+    $('meState').textContent = '最新の状態を確認しています…';
+  } else if(me){ renderMe({ uid: me.uid, company: me.company, name: me.name, state: 'out' }); $('meState').textContent = '最新の状態を確認しています…'; $('act').disabled = true; }
   refresh();
   timer = setInterval(function(){ if(document.visibilityState !== 'hidden') refresh(); }, 60000);
 }
