@@ -69,7 +69,8 @@ h2{font-size:15px;margin:0 0 6px}
   <div class="who"><span id="meName"></span><small id="meCo"></small></div>
   <div class="state" id="meState"></div>
   <button type="button" class="big" id="act"></button>
-  <button type="button" class="link" id="switch">別の人に切り替える</button>
+  <button type="button" class="link" id="switch">お名前を選び直す</button>
+  <p class="sub" id="lockNote" style="display:none;margin:8px 0 0">お名前を間違えたときは、現場監督に伝えてください。</p>
 </div>
 
 <div id="listCard" class="card" style="display:none">
@@ -130,7 +131,10 @@ function renderList(list){
 }
 function renderMe(m){
   if(!m){ show('meCard', false); show('chooser', true); return; }
-  me = { uid: m.uid || '', company: m.company, name: m.name }; saveMe();
+  // 一度でも記録した(いま現場にいる)ら、この端末では、他の人に切り替えられない(他の人の名前で押すのを防ぐ)
+  var lk = !!(m.state === 'in' || (me && me.locked && me.name === m.name));
+  me = { uid: m.uid || '', company: m.company, name: m.name, locked: lk }; saveMe();
+  $('switch').style.display = lk ? 'none' : ''; $('lockNote').style.display = lk ? 'block' : 'none';
   show('chooser', false); show('meCard', true);
   $('meName').textContent = m.name + ' さん';
   $('meCo').textContent = m.company + (m.reg === '未登録' ? '（名簿に未登録）' : '');
@@ -147,6 +151,7 @@ function onData(r, recorded){
   document.title = (r.siteName || '入退室') + ' の入退室';
   saveLast(r);
   show('listCard', true); renderList(r.list || []); renderMe(r.me);
+  if(recorded && r.me){ me.locked = true; saveMe(); $('switch').style.display = 'none'; $('lockNote').style.display = 'block'; }
   if(recorded && r.me){ toast(r.duplicate ? 'すでに「' + (r.me.state === 'in' ? '入場' : '退場') + '」になっています' : (r.me.state === 'in' ? '入場を記録しました（' + r.now + '）' : '退場を記録しました（' + r.now + '）')); }
 }
 function refresh(){ if(busy) return; api({ a: 'open', who: me }, function(r){ onData(r, false); }, showErr); }
@@ -157,7 +162,7 @@ $('act').addEventListener('click', function(){
   var act = this.dataset.act; this.textContent = '送っています…';
   api({ a: 'record', act: act, who: me }, function(r){ onData(r, true); }, function(t){ busy = false; $('act').disabled = false; $('act').textContent = act; showErr(t); });
 });
-$('switch').addEventListener('click', function(){ me = null; saveMe(); $('q').value = ''; $('cands').textContent = ''; show('noCand', false); renderMe(null); });
+$('switch').addEventListener('click', function(){ if(me && me.locked) return; me = null; saveMe(); $('q').value = ''; $('cands').textContent = ''; show('noCand', false); renderMe(null); });
 $('showManual').addEventListener('click', function(){ show('manual', true); this.style.display = 'none'; });
 $('manualOk').addEventListener('click', function(){
   var c = $('mc').value.trim(), n = $('mn').value.trim();
