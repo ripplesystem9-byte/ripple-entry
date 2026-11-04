@@ -83,12 +83,13 @@ h2{font-size:15px;margin:0 0 6px}
 <script>
 // ---- 場所(g)・現場(s)・合言葉(k)は、QRのアドレスから読む。形が合わないものは使わない ----
 var P = new URLSearchParams(location.search);
-var CTX = { g: P.get('g') || '', s: P.get('s') || '', k: P.get('k') || '' };
+var CTX = { g: P.get('g') || '', s: P.get('s') || '', k: P.get('k') || '', r: P.get('r') || '' };
 var G_OK = /^https:\/\/script\.google\.com\/(?:a\/macros\/[\w.-]+|macros)\/s\/[\w-]+\/exec$/;
 var G_LOCAL = /^http:\/\/localhost:\d+\/?$/;    // 試験用(このパソコンの中だけ)
 if(!(G_OK.test(CTX.g) || (location.hostname === 'localhost' && G_LOCAL.test(CTX.g)))) CTX.g = '';
 if(!/^[\w-]{1,40}$/.test(CTX.s)) CTX.s = '';
 if(!/^[a-f0-9]{8,32}$/.test(CTX.k)) CTX.k = '';
+if(!/^[a-f0-9]{16}$/.test(CTX.r)) CTX.r = '';
 
 var KEY = 'ripple_entry_me_v1';
 var me = null, busy = false, timer = null, searchTimer = null;
@@ -189,6 +190,7 @@ $('q').addEventListener('input', function(){
     }, showErr);
   }, 300);
 });
+function startUp(){
 loadMe();
 if(!CTX.g || !CTX.s || !CTX.k){ showErr('このQRコードは、いま使えません。現場の方に、新しいQRコードを確認してください。'); }
 else {
@@ -201,4 +203,15 @@ else {
   refresh();
   timer = setInterval(function(){ if(document.visibilityState !== 'hidden') refresh(); }, 60000);
 }
+}
+// 選び直し用リンク(?r=...)で開いたとき: 合言葉が合えば、この端末の「お名前」と「前回の表示」を消して、選び直せるようにする
+if(CTX.s && CTX.k && CTX.r && CTX.g){
+  api({ a: 'reset', rc: CTX.r }, function(r){
+    if(r && r.ok){
+      try{ localStorage.removeItem(KEY); localStorage.removeItem(CKEY); }catch(e){}
+      try{ var u = new URL(location.href); u.searchParams.delete('r'); history.replaceState(null, '', u.toString()); }catch(e){}
+      CTX.r = ''; startUp(); toast('この端末のお名前を消しました。もう一度、お名前を選んでください。');
+    } else { showErr((r && r.error) || 'このリンクは、使えません。'); }
+  }, showErr);
+} else startUp();
 </script></body></html>
