@@ -132,8 +132,9 @@ function renderList(list){
 function renderMe(m){
   if(!m){ show('meCard', false); show('chooser', true); return; }
   // 一度でも記録した(いま現場にいる)ら、この端末では、他の人に切り替えられない(他の人の名前で押すのを防ぐ)
-  var lk = !!(m.state === 'in' || (me && me.locked && me.name === m.name));
-  me = { uid: m.uid || '', company: m.company, name: m.name, locked: lk }; saveMe();
+  // 名前を選んだ直後(まだ一度も記録していない)の間だけ、選び直せる。それ以外(前から使っている端末も)は、切り替えられない
+  var fresh = !!(me && me.fresh && m.state !== 'in'), lk = !fresh;
+  me = { uid: m.uid || '', company: m.company, name: m.name, locked: lk, fresh: fresh }; saveMe();
   $('switch').style.display = lk ? 'none' : ''; $('lockNote').style.display = lk ? 'block' : 'none';
   show('chooser', false); show('meCard', true);
   $('meName').textContent = m.name + ' さん';
@@ -151,11 +152,11 @@ function onData(r, recorded){
   document.title = (r.siteName || '入退室') + ' の入退室';
   saveLast(r);
   show('listCard', true); renderList(r.list || []); renderMe(r.me);
-  if(recorded && r.me){ me.locked = true; saveMe(); $('switch').style.display = 'none'; $('lockNote').style.display = 'block'; }
+  if(recorded && r.me){ me.locked = true; me.fresh = false; saveMe(); $('switch').style.display = 'none'; $('lockNote').style.display = 'block'; }
   if(recorded && r.me){ toast(r.duplicate ? 'すでに「' + (r.me.state === 'in' ? '入場' : '退場') + '」になっています' : (r.me.state === 'in' ? '入場を記録しました（' + r.now + '）' : '退場を記録しました（' + r.now + '）')); }
 }
 function refresh(){ if(busy) return; api({ a: 'open', who: me }, function(r){ onData(r, false); }, showErr); }
-function choose(who){ me = who; saveMe(); refresh(); }
+function choose(who){ who.fresh = true; me = who; saveMe(); refresh(); }
 
 $('act').addEventListener('click', function(){
   if(busy) return; busy = true; this.disabled = true;
