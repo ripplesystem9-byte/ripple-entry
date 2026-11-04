@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>入退室の記録</title>
+<!--
+  職人・社員が、現場の入口のQRを読むと開く画面(1ファイルだけ)。
+  アプリ(パソコンの中で動く)とは別に、住所が変わらない場所(GitHub Pages など)に置いて使う。
+  住所が変わらないので、スマホが「自分の名前」を覚えてくれる(Googleの画面の中に出すと、覚えないことがあるため)。
+  この画面には、秘密の値は入っていない。QRのアドレスに、司令塔(Code.gs)の場所(g)・現場(s)・その現場の合言葉(k)が入っている。
+  受付は、司令塔(Code.gs)の doPost の action:'entry'。
+-->
+<style>
+:root{--ink:#1d2433;--sub:#5b6577;--line:#dfe3ea;--main:#1f4e78;--in:#2e8b57;--out:#b8402f;--bg:#f4f6fa}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic",sans-serif;background:var(--bg);color:var(--ink);font-size:16px;line-height:1.5}
+.wrap{max-width:520px;margin:0 auto;padding:16px 16px 48px}
+h1{font-size:21px;margin:6px 0 2px}
+.sub{color:var(--sub);font-size:13px;margin:0 0 14px}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+.err{background:#fdecea;border:1px solid #f1b5ae;color:#8a2a1f;border-radius:10px;padding:12px;margin-bottom:14px;display:none}
+.who{font-size:19px;font-weight:700}
+.who small{display:block;font-weight:400;color:var(--sub);font-size:13px}
+.state{margin-top:6px;font-size:14px;color:var(--sub)}
+.big{display:block;width:100%;border:0;border-radius:14px;padding:22px 12px;font-size:25px;font-weight:700;color:#fff;margin-top:12px;cursor:pointer}
+.big.in{background:var(--in)}.big.out{background:var(--out)}.big[disabled]{opacity:.5}
+.link{background:none;border:0;color:var(--main);text-decoration:underline;font-size:14px;padding:8px 0;cursor:pointer}
+label{display:block;font-size:13px;color:var(--sub);margin:12px 0 4px}
+input[type=text]{width:100%;font-size:18px;padding:12px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink)}
+.cand{display:block;width:100%;text-align:left;background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:8px;font-size:16px;cursor:pointer;color:var(--ink)}
+.cand b{display:block}
+.cand span{color:var(--sub);font-size:13px}
+.btn{display:block;width:100%;border:0;border-radius:10px;padding:14px;font-size:17px;font-weight:700;background:var(--main);color:#fff;margin-top:12px;cursor:pointer}
+h2{font-size:15px;margin:0 0 6px}
+.row{display:grid;grid-template-columns:1fr 54px 54px;gap:8px;padding:9px 0;border-top:1px solid var(--line);font-size:14px;align-items:center}
+.row.head{border-top:0;color:var(--sub);font-size:12px;padding-top:0}
+.row .n{font-weight:600}.row .c{color:var(--sub);font-size:12px}
+.t{font-variant-numeric:tabular-nums;text-align:right}
+.badge{display:inline-block;font-size:11px;padding:1px 6px;border-radius:8px;background:#e8eef7;color:var(--main);margin-left:4px;font-weight:400}
+.nowin{color:var(--in);font-weight:700}
+.empty{color:var(--sub);font-size:14px;padding:8px 0}
+.foot{color:var(--sub);font-size:12px;margin-top:16px}
+.toast{position:fixed;left:16px;right:16px;bottom:20px;background:#1d2433;color:#fff;padding:14px;border-radius:12px;text-align:center;display:none;font-size:16px}
+</style></head><body><div class="wrap">
+<h1 id="site">入退室の記録</h1>
+<p class="sub">現場に入るとき・出るときに、ここで押してください。</p>
+<div id="err" class="err"></div>
+
+<div id="chooser" class="card" style="display:none">
+  <div class="who">はじめに、お名前を教えてください</div>
+  <label for="q">お名前（名字だけでも探せます）</label>
+  <input type="text" id="q" autocomplete="off" placeholder="例: 山田">
+  <div id="cands"></div>
+  <div id="noCand" class="empty" style="display:none">見つかりません。下の「名簿にない場合」から入れてください。</div>
+  <button type="button" class="link" id="showManual">名簿にない場合はこちら</button>
+  <div id="manual" style="display:none">
+    <label for="mc">会社名（個人の方は、屋号かお名前）</label>
+    <input type="text" id="mc" autocomplete="off">
+    <label for="mn">お名前（フルネーム）</label>
+    <input type="text" id="mn" autocomplete="off">
+    <button type="button" class="btn" id="manualOk">この名前で使う</button>
+  </div>
+</div>
+
+<div id="meCard" class="card" style="display:none">
+  <div class="who"><span id="meName"></span><small id="meCo"></small></div>
+  <div class="state" id="meState"></div>
+  <button type="button" class="big" id="act"></button>
+  <button type="button" class="link" id="switch">別の人に切り替える</button>
+</div>
+
+<div id="listCard" class="card" style="display:none">
+  <h2 id="listTitle">今日の入退場</h2>
+  <div id="list"></div>
+</div>
+<p class="foot">この記録は、職人さんの分は3日、社員の分は1か月で、自動的に消えます。</p>
+</div>
+<div id="toast" class="toast"></div>
+<script>
+// ---- 場所(g)・現場(s)・合言葉(k)は、QRのアドレスから読む。形が合わないものは使わない ----
+var P = new URLSearchParams(location.search);
+var CTX = { g: P.get('g') || '', s: P.get('s') || '', k: P.get('k') || '' };
+var G_OK = /^https:\/\/script\.google\.com\/(?:a\/macros\/[\w.-]+|macros)\/s\/[\w-]+\/exec$/;
+var G_LOCAL = /^http:\/\/localhost:\d+\/?$/;    // 試験用(このパソコンの中だけ)
+if(!(G_OK.test(CTX.g) || (location.hostname === 'localhost' && G_LOCAL.test(CTX.g)))) CTX.g = '';
+if(!/^[\w-]{1,40}$/.test(CTX.s)) CTX.s = '';
+if(!/^[a-f0-9]{8,32}$/.test(CTX.k)) CTX.k = '';
+
+var KEY = 'ripple_entry_me_v1';
+var me = null, busy = false, timer = null, searchTimer = null;
+function $(id){ return document.getElementById(id); }
+function loadMe(){ try{ var v = localStorage.getItem(KEY); me = v ? JSON.parse(v) : null; }catch(e){ me = null; } }
+function saveMe(){ try{ if(me) localStorage.setItem(KEY, JSON.stringify(me)); else localStorage.removeItem(KEY); }catch(e){} }
+function show(id, on){ $(id).style.display = on ? 'block' : 'none'; }
+function showErr(t){ var e = $('err'); if(t){ e.textContent = t; e.style.display = 'block'; } else e.style.display = 'none'; }
+function toast(t){ var e = $('toast'); e.textContent = t; e.style.display = 'block'; setTimeout(function(){ e.style.display = 'none'; }, 2600); }
+function api(payload, ok, ng){
+  var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  var tm = ctrl ? setTimeout(function(){ ctrl.abort(); }, 40000) : null;
+  var body = JSON.stringify(Object.assign({ action: 'entry', s: CTX.s, k: CTX.k }, payload));
+  fetch(CTX.g, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: body, signal: ctrl ? ctrl.signal : undefined })
+    .then(function(r){ return r.json(); })
+    .then(function(r){ if(tm) clearTimeout(tm); ok(r); })
+    .catch(function(){ if(tm) clearTimeout(tm); ng('通信できませんでした。電波のよいところで、もう一度お試しください。'); });
+}
+function el(tag, cls, text){ var e = document.createElement(tag); if(cls) e.className = cls; if(text !== undefined) e.textContent = text; return e; }
+
+function renderList(list){
+  var box = $('list'); box.textContent = '';
+  var inside = list.filter(function(v){ return v.inside; }).length;
+  $('listTitle').textContent = '今日の入退場（いま現場に ' + inside + '人）';
+  if(!list.length){ box.appendChild(el('div', 'empty', 'まだ、だれも記録していません。')); return; }
+  var head = el('div', 'row head'); head.appendChild(el('div', '', '会社・お名前')); head.appendChild(el('div', 't', '入')); head.appendChild(el('div', 't', '出')); box.appendChild(head);
+  list.forEach(function(v){
+    var r = el('div', 'row'), left = el('div');
+    var n = el('div', 'n', v.name); if(v.kind === '社員') n.appendChild(el('span', 'badge', '社員'));
+    left.appendChild(n); left.appendChild(el('div', 'c', v.company));
+    r.appendChild(left); r.appendChild(el('div', 't', v['in'] || '-'));
+    var out = el('div', 't', v.out || (v.inside ? 'いま' : '-')); if(!v.out && v.inside) out.className = 't nowin';
+    r.appendChild(out); box.appendChild(r);
+  });
+}
+function renderMe(m){
+  if(!m){ show('meCard', false); show('chooser', true); return; }
+  me = { uid: m.uid || '', company: m.company, name: m.name }; saveMe();
+  show('chooser', false); show('meCard', true);
+  $('meName').textContent = m.name + ' さん';
+  $('meCo').textContent = m.company + (m.reg === '未登録' ? '（名簿に未登録）' : '');
+  var b = $('act');
+  if(m.state === 'in'){ b.textContent = '退場する'; b.className = 'big out'; b.dataset.act = '退場'; $('meState').textContent = (m.since || '') + ' から、現場にいます'; }
+  else { b.textContent = '入場する'; b.className = 'big in'; b.dataset.act = '入場'; $('meState').textContent = 'いまは、現場の外です'; }
+  b.disabled = false;
+}
+function onData(r, recorded){
+  busy = false;
+  if(!r.ok){ showErr(r.error); if(r.invalid){ show('chooser', false); show('meCard', false); show('listCard', false); } return; }
+  showErr('');
+  $('site').textContent = r.siteName || '入退室の記録';
+  document.title = (r.siteName || '入退室') + ' の入退室';
+  show('listCard', true); renderList(r.list || []); renderMe(r.me);
+  if(recorded && r.me){ toast(r.duplicate ? 'すでに「' + (r.me.state === 'in' ? '入場' : '退場') + '」になっています' : (r.me.state === 'in' ? '入場を記録しました（' + r.now + '）' : '退場を記録しました（' + r.now + '）')); }
+}
+function refresh(){ if(busy) return; api({ a: 'open', who: me }, function(r){ onData(r, false); }, showErr); }
+function choose(who){ me = who; saveMe(); refresh(); }
+
+$('act').addEventListener('click', function(){
+  if(busy) return; busy = true; this.disabled = true;
+  var act = this.dataset.act;
+  api({ a: 'record', act: act, who: me }, function(r){ onData(r, true); }, function(t){ busy = false; $('act').disabled = false; showErr(t); });
+});
+$('switch').addEventListener('click', function(){ me = null; saveMe(); $('q').value = ''; $('cands').textContent = ''; show('noCand', false); renderMe(null); });
+$('showManual').addEventListener('click', function(){ show('manual', true); this.style.display = 'none'; });
+$('manualOk').addEventListener('click', function(){
+  var c = $('mc').value.trim(), n = $('mn').value.trim();
+  if(!n){ showErr('お名前を入れてください'); return; }
+  showErr(''); choose({ uid: '', company: c, name: n });
+});
+$('q').addEventListener('input', function(){
+  clearTimeout(searchTimer);
+  var q = this.value.trim(), box = $('cands');
+  if(q.length < 1){ box.textContent = ''; show('noCand', false); return; }
+  searchTimer = setTimeout(function(){
+    api({ a: 'search', q: q }, function(r){
+      box.textContent = '';
+      if(!r.ok){ showErr(r.error); return; }
+      showErr(''); show('noCand', !(r.candidates || []).length && q.length >= 2);
+      (r.candidates || []).forEach(function(c){
+        var b = el('button', 'cand'); b.type = 'button';
+        b.appendChild(el('b', '', c.name)); b.appendChild(el('span', '', c.company));
+        b.addEventListener('click', function(){ choose({ uid: c.uid, company: c.company, name: c.name }); });
+        box.appendChild(b);
+      });
+    }, showErr);
+  }, 300);
+});
+loadMe();
+if(!CTX.g || !CTX.s || !CTX.k){ showErr('このQRコードは、いま使えません。現場の方に、新しいQRコードを確認してください。'); }
+else {
+  refresh();
+  timer = setInterval(function(){ if(document.visibilityState !== 'hidden') refresh(); }, 60000);
+}
+</script></body></html>
