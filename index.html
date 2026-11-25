@@ -42,6 +42,27 @@ h2{font-size:15px;margin:0 0 6px}
 .empty{color:var(--sub);font-size:14px;padding:8px 0}
 .hint{background:#fff8e6;border:1px solid #f1d9a0;color:#6b4e00;border-radius:10px;padding:10px 12px;margin-top:12px;font-size:13px}
 .foot{color:var(--sub);font-size:12px;margin-top:16px}
+.pc-draw{position:relative;line-height:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:8px 0;background:#f4f6fa}
+.pc-draw img{width:100%;height:auto;display:block}
+.pc-pin{position:absolute;transform:translate(-50%,-50%);width:28px;height:28px;border-radius:50%;background:#dc2626;color:#fff;border:2px solid #fff;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;line-height:1;box-shadow:0 1px 3px rgba(0,0,0,.35)}
+.pc-pin.wait{background:#2563eb}
+.pc-item{border-top:1px solid var(--line);padding:12px 0}
+.pc-head{display:flex;gap:10px;align-items:flex-start}
+.pc-no{flex:none;width:28px;height:28px;border-radius:50%;background:#dc2626;color:#fff;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center}
+.pc-no.wait{background:#2563eb}
+.pc-txt{flex:1;font-size:15px}
+.pc-txt small{display:block;color:var(--sub);font-size:12px}
+.pc-redo{display:inline-block;background:#fff1e6;color:#9a3412;border-radius:6px;font-size:12px;padding:1px 6px;margin-left:4px}
+.pc-acts{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px;padding-left:38px;font-size:14px;color:var(--sub)}
+.pc-photo{display:inline-block;border:1px solid var(--main);color:var(--main);border-radius:10px;padding:10px 12px;font-size:15px;background:#fff;cursor:pointer;margin:0}
+.pc-done{display:inline-flex;align-items:center;gap:6px;font-size:16px;font-weight:700;padding:8px 4px;margin:0;color:var(--ink)}
+.pc-done input{width:24px;height:24px}
+.pc-thumbs{display:flex;flex-wrap:wrap;gap:6px;padding-left:38px;margin-top:6px}
+.pc-thumbs img{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
+.pc-send{background:#2e8b57}
+.pc-send[disabled]{opacity:.45}
+.pc-view{position:fixed;inset:0;background:rgba(15,23,42,.85);display:flex;align-items:center;justify-content:center;padding:16px;z-index:9}
+.pc-view img{max-width:100%;max-height:90vh;border-radius:8px}
 .toast{position:fixed;left:16px;right:16px;bottom:20px;background:#1d2433;color:#fff;padding:14px;border-radius:12px;text-align:center;display:none;font-size:16px}
 </style></head><body><div class="wrap">
 <h1 id="site">入退室の記録</h1>
@@ -71,6 +92,15 @@ h2{font-size:15px;margin:0 0 6px}
   <button type="button" class="big" id="act"></button>
   <button type="button" class="link" id="switch">お名前を選び直す</button>
   <p class="sub" id="lockNote" style="display:none;margin:8px 0 0">お名前を間違えたときは、現場監督に伝えてください。</p>
+</div>
+
+<div id="punchCard" class="card" style="display:none">
+  <h2 id="pcTitle">この現場の是正（直す所）</h2>
+  <p class="sub" id="pcNote" style="margin:0 0 6px"></p>
+  <div id="pcDraws"></div>
+  <div id="pcList"></div>
+  <button type="button" class="btn pc-send" id="pcSend" disabled>是正完了を送る</button>
+  <p class="sub" id="pcMsg" style="margin:8px 0 0"></p>
 </div>
 
 <div id="listCard" class="card" style="display:none">
@@ -153,9 +183,127 @@ function onData(r, recorded){
   document.title = (r.siteName || '入退室') + ' の入退室';
   saveLast(r);
   show('listCard', true); renderList(r.list || []); renderMe(r.me);
+  if(r.me && (!PC.loaded || recorded)) pcLoad();      // 是正(入室した人の会社の分)を出す(2026-11-25)
   if(recorded && r.me){ me.locked = true; me.fresh = false; saveMe(); $('switch').style.display = 'none'; $('lockNote').style.display = 'block'; }
   if(recorded && r.me){ toast(r.duplicate ? 'すでに「' + (r.me.state === 'in' ? '入場' : '退場') + '」になっています' : (r.me.state === 'in' ? '入場を記録しました（' + r.now + '）' : '退場を記録しました（' + r.now + '）')); }
 }
+// ---- 是正(手直し)。入室すると、その現場の是正(自分の会社の分)が出る。写真を付けて「直した」→「是正完了を送る」(2026-11-25) ----
+var PC = { items: [], sel: {}, photos: {}, loaded: false, busy: false, imgs: {}, others: false };
+function papi(payload, ms){
+  return new Promise(function(resolve, reject){
+    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var tm = ctrl ? setTimeout(function(){ ctrl.abort(); }, ms || 60000) : null;
+    fetch(CTX.g, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ action: 'entry', s: CTX.s, k: CTX.k }, payload)), signal: ctrl ? ctrl.signal : undefined })
+      .then(function(r){ return r.json(); }).then(function(r){ if(tm) clearTimeout(tm); resolve(r); })
+      .catch(function(){ if(tm) clearTimeout(tm); reject(new Error('通信できませんでした。電波のよいところで、もう一度お試しください。')); });
+  });
+}
+function pcImg(fid){
+  if(PC.imgs[fid]) return PC.imgs[fid];
+  PC.imgs[fid] = papi({ a: 'punchImage', fileId: fid }, 90000).then(function(r){ if(!r.ok) throw new Error(r.error || '画像を読めませんでした'); return 'data:image/jpeg;base64,' + r.base64; });
+  PC.imgs[fid].catch(function(){ delete PC.imgs[fid]; });
+  return PC.imgs[fid];
+}
+function pcShrink(file){
+  return new Promise(function(resolve, reject){
+    var fr = new FileReader();
+    fr.onerror = function(){ reject(new Error('写真を読めませんでした')); };
+    fr.onload = function(){
+      var img = new Image();
+      img.onerror = function(){ reject(new Error('写真を読めませんでした')); };
+      img.onload = function(){
+        var k = Math.min(1, 1600 / Math.max(img.width, img.height)), c = document.createElement('canvas');
+        c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        var g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+        resolve(c.toDataURL('image/jpeg', 0.82));
+      };
+      img.src = fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+function pcView(src){ var v = el('div', 'pc-view'); var im = el('img'); im.src = src; v.appendChild(im); v.addEventListener('click', function(){ v.remove(); }); document.body.appendChild(v); }
+function pcLoad(){
+  if(!me || PC.busy) return;
+  papi({ a: 'punch', who: me }, 60000).then(function(r){
+    if(!r || !r.ok) return;
+    var all = r.items || [], mine = all.filter(function(t){ return t.mine; });
+    var co = String(me.company || '').trim();
+    PC.items = mine.length ? mine : (!co || !me.uid ? all : []);
+    PC.others = !mine.length && PC.items.length > 0;
+    PC.loaded = true; pcRender();
+  }).catch(function(){});
+}
+function pcRender(){
+  var card = $('punchCard');
+  if(!PC.items.length){ card.style.display = 'none'; return; }
+  card.style.display = 'block';
+  var dl = PC.items.map(function(t){ return t.deadline; }).filter(Boolean).sort()[0];
+  $('pcTitle').textContent = 'この現場の是正（直す所） ' + PC.items.length + '件';
+  $('pcNote').textContent = (dl ? '期限 ' + dl.slice(5).replace('-', '/') + '　' : '') + (PC.others ? '会社が分からないので、この現場の全部を出しています。自分の分を選んでください。' : '直したら、写真を付けて「直した」に印を付け、いちばん下の「是正完了を送る」を押してください。');
+  var dbox = $('pcDraws'); dbox.textContent = '';
+  var dids = []; PC.items.forEach(function(t){ if(t.drawing && dids.indexOf(t.drawing) < 0) dids.push(t.drawing); });
+  dids.forEach(function(d){
+    var w = el('div', 'pc-draw'), im = el('img'); im.alt = '図面'; w.appendChild(im);
+    PC.items.filter(function(t){ return t.drawing === d; }).forEach(function(t){
+      var p = el('div', 'pc-pin' + (t.status === '確認待ち' ? ' wait' : ''), String(t.no)); p.style.left = t.x + '%'; p.style.top = t.y + '%'; w.appendChild(p);
+    });
+    var wait = el('div', 'empty', '図面を読み込んでいます…'); w.appendChild(wait);
+    dbox.appendChild(w);
+    pcImg(d).then(function(src){ im.src = src; wait.remove(); w.addEventListener('click', function(){ pcView(src); }); }).catch(function(){ wait.textContent = '図面を読めませんでした（ANDPADの資料の図面を見てください）'; });
+  });
+  var list = $('pcList'); list.textContent = '';
+  PC.items.forEach(function(t){
+    var it = el('div', 'pc-item'), hd = el('div', 'pc-head');
+    hd.appendChild(el('div', 'pc-no' + (t.status === '確認待ち' ? ' wait' : ''), String(t.no)));
+    var tx = el('div', 'pc-txt', (t.place ? t.place + '　' : '') + (t.text || ''));
+    if(t.status === 'やり直し') tx.appendChild(el('span', 'pc-redo', 'やり直し'));
+    tx.appendChild(el('small', '', (t.vendor ? t.vendor + '　' : '') + (t.deadline ? '期限 ' + t.deadline.slice(5).replace('-', '/') : '')));
+    hd.appendChild(tx); it.appendChild(hd);
+    if(t.photos && t.photos.length){
+      var see = el('button', 'link', '直す所の写真を見る（' + t.photos.length + '枚）'); see.type = 'button'; see.style.marginLeft = '38px';
+      see.addEventListener('click', function(){
+        see.textContent = '読み込み中…';
+        Promise.all(t.photos.map(pcImg)).then(function(srcs){ var th = el('div', 'pc-thumbs'); srcs.forEach(function(sr){ var i = el('img'); i.src = sr; i.addEventListener('click', function(){ pcView(sr); }); th.appendChild(i); }); see.replaceWith(th); }).catch(function(){ see.textContent = '写真を読めませんでした'; });
+      });
+      it.appendChild(see);
+    }
+    if(t.status === '確認待ち'){ it.appendChild(el('div', 'pc-acts', '報告ずみです（監督の確認待ち）')); list.appendChild(it); return; }
+    var acts = el('div', 'pc-acts');
+    var lab = el('label', 'pc-photo', '📷 写真を付ける'), fi = el('input'); fi.type = 'file'; fi.accept = 'image/*'; fi.multiple = true; fi.hidden = true; lab.appendChild(fi);
+    var chk = el('label', 'pc-done'), cb = el('input'); cb.type = 'checkbox'; cb.checked = !!PC.sel[t.id]; chk.appendChild(cb); chk.appendChild(document.createTextNode('直した'));
+    acts.appendChild(lab); acts.appendChild(chk); it.appendChild(acts);
+    var th = el('div', 'pc-thumbs'); (PC.photos[t.id] || []).forEach(function(u){ var i = el('img'); i.src = u; th.appendChild(i); }); it.appendChild(th);
+    fi.addEventListener('change', function(){
+      var fs = Array.prototype.slice.call(fi.files || []).slice(0, 4);
+      Promise.all(fs.map(pcShrink)).then(function(us){ PC.photos[t.id] = (PC.photos[t.id] || []).concat(us).slice(0, 6); PC.sel[t.id] = true; pcRender(); }).catch(function(e){ showErr(e.message); });
+    });
+    cb.addEventListener('change', function(){ PC.sel[t.id] = cb.checked; pcSendState(); });
+    list.appendChild(it);
+  });
+  pcSendState();
+}
+function pcSendState(){ var n = Object.keys(PC.sel).filter(function(k){ return PC.sel[k]; }).length, b = $('pcSend'); b.disabled = !n || PC.busy; b.textContent = n ? '是正完了を送る（' + n + '件）' : '是正完了を送る'; }
+$('pcSend').addEventListener('click', function(){
+  var ids = Object.keys(PC.sel).filter(function(k){ return PC.sel[k]; });
+  if(!ids.length || PC.busy) return;
+  var noPhoto = ids.filter(function(id){ return !(PC.photos[id] || []).length; }).length;
+  if(noPhoto && !confirm('写真が付いていない所が ' + noPhoto + '件 あります。このまま送りますか?')) return;
+  PC.busy = true; pcSendState(); $('pcMsg').textContent = '送っています…';
+  var reports = ids.map(function(id){ return { id: id, photos: [] }; }), jobs = [];
+  reports.forEach(function(rp){ (PC.photos[rp.id] || []).forEach(function(u){ jobs.push({ rp: rp, b64: u.split(',')[1] }); }); });
+  var n = 0;
+  jobs.reduce(function(pr, j){ return pr.then(function(){ $('pcMsg').textContent = '写真を送っています… ' + (++n) + ' / ' + jobs.length; return papi({ a: 'punchPhoto', base64: j.b64 }, 120000).then(function(r){ if(!r.ok) throw new Error(r.error || '写真を送れませんでした'); j.rp.photos.push(r.fileId); }); }); }, Promise.resolve())
+    .then(function(){ $('pcMsg').textContent = '完了を送っています…'; return papi({ a: 'punchReport', who: me, reports: reports }, 60000); })
+    .then(function(r){
+      PC.busy = false;
+      if(!r.ok) throw new Error(r.error || '送れませんでした');
+      PC.sel = {}; PC.photos = {}; $('pcMsg').textContent = '';
+      toast('是正完了を送りました（' + r.count + '件）。監督に知らせました。');
+      pcLoad();
+    })
+    .catch(function(e){ PC.busy = false; pcSendState(); $('pcMsg').textContent = ''; showErr(e.message + '（もう一度「是正完了を送る」を押してください）'); });
+});
 function refresh(){ if(busy) return; api({ a: 'open', who: me }, function(r){ onData(r, false); }, showErr); }
 function choose(who){ who.fresh = true; me = who; saveMe(); refresh(); }
 
